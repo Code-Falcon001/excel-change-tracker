@@ -9,6 +9,9 @@
   const testBtn = document.getElementById("testBtn");
   const clearLogBtn = document.getElementById("clearLogBtn");
 
+  let isTracking = false;
+  let autoStarted = false;
+
   function now() {
     return new Date().toLocaleString();
   }
@@ -30,32 +33,73 @@
     el.className = `value ${cssClass || ""}`.trim();
   }
 
+  function updateButtonStates() {
+    if (startBtn) startBtn.disabled = isTracking;
+    if (stopBtn) stopBtn.disabled = !isTracking;
+  }
+
+  function startTracking(source = "Manual start") {
+    if (isTracking) {
+      log(`Tracking is already active. Trigger ignored: ${source}`);
+      return;
+    }
+
+    isTracking = true;
+    setText(statusValue, "Tracking started automatically", "ok");
+    log(`Tracking started. Source: ${source}`);
+    updateButtonStates();
+  }
+
+  function stopTracking() {
+    if (!isTracking) {
+      log("Tracking is already stopped.");
+      return;
+    }
+
+    isTracking = false;
+    setText(statusValue, "Tracking stopped", "warn");
+    log("Tracking stopped manually.");
+    updateButtonStates();
+  }
+
+  function autoStartTracking() {
+    if (autoStarted) return;
+    autoStarted = true;
+    startTracking("Auto-start on page load");
+  }
+
   function initButtons() {
-    startBtn.addEventListener("click", () => {
-      setText(statusValue, "Tracking started", "ok");
-      log("Start Tracking clicked.");
-    });
+    if (startBtn) {
+      startBtn.addEventListener("click", () => {
+        startTracking("Start button clicked");
+      });
+    }
 
-    stopBtn.addEventListener("click", () => {
-      setText(statusValue, "Tracking stopped", "warn");
-      log("Stop Tracking clicked.");
-    });
+    if (stopBtn) {
+      stopBtn.addEventListener("click", () => {
+        stopTracking();
+      });
+    }
 
-    testBtn.addEventListener("click", () => {
-      log("Test Page clicked. UI is responsive.");
-      alert("Change Tracker page is loading correctly.");
-    });
+    if (testBtn) {
+      testBtn.addEventListener("click", () => {
+        log("Test Page clicked. UI is responsive.");
+        alert("Change Tracker page is loading correctly.");
+      });
+    }
 
-    clearLogBtn.addEventListener("click", () => {
-      logOutput.textContent = "";
-    });
+    if (clearLogBtn) {
+      clearLogBtn.addEventListener("click", () => {
+        logOutput.textContent = "";
+      });
+    }
   }
 
   function initBrowserMode() {
     setText(environmentValue, "Browser / GitHub Pages", "ok");
     setText(officeValue, "Office.js loaded, waiting for host...", "warn");
-    setText(statusValue, "Page loaded successfully", "ok");
-    log("Page opened in a browser-safe mode.");
+    setText(statusValue, "Initializing...", "warn");
+    log("Page opened in browser-safe mode.");
   }
 
   function initOfficeMode(info) {
@@ -64,13 +108,16 @@
 
     setText(environmentValue, `${host} (${platform})`, "ok");
     setText(officeValue, "Office host ready", "ok");
-    setText(statusValue, "Ready inside Office", "ok");
     log(`Office.onReady triggered. Host=${host}, Platform=${platform}`);
   }
 
   function init() {
     initButtons();
     initBrowserMode();
+    updateButtonStates();
+
+    // Auto-start immediately when page loads
+    autoStartTracking();
 
     if (typeof Office !== "undefined" && typeof Office.onReady === "function") {
       Office.onReady((info) => {
