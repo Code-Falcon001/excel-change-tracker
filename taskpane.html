@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Change Tracker v5.0</title>
+
+  <!-- Office JavaScript API (same hosted pattern used in Microsoft Office add-in samples) -->
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+
+  <link rel="stylesheet" href="./taskpane.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>Change Tracker v5.0</h1>
+      <p class="subtitle">
+        GitHub Pages hosted task pane page for Excel Change Tracker
+      </p>
+    </header>
+
+    <section class="status-card">
+      <div class="status-row">
+        <span class="label">Environment</span>
+        <span id="environmentValue" class="value">Checking...</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Office.js</span>
+        <span id="officeValue" class="value">Loading...</span>
+      </div>
+      <div class="status-row">
+        <span class="label">Status</span>
+        <span id="statusValue" class="value">Waiting...</span>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button id="startBtn" class="btn primary" type="button">Start Tracking</button>
+      <button id="stopBtn" class="btn secondary" type="button">Stop Tracking</button>
+      <button id="testBtn" class="btn ghost" type="button">Test Page</button>
+    </section>
+
+    <section class="log-card">
+      <div class="log-header">
+        <h2>Activity Log</h2>
+        <button id="clearLogBtn" class="btn small" type="button">Clear</button>
+      </div>
+      <div id="logOutput" class="log-output"></div>
+    </section>
+
+    <section class="info-card">
+      <h2>What to expect</h2>
+      <ul>
+        <li>When opened in a normal browser, the page should still load.</li>
+        <li>When loaded inside Excel as an add-in page, Office.js should initialize.</li>
+        <li>This hosted page is suitable for GitHub Pages project-site hosting.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="./taskpane.js"></script>
+</body>
+</html>
