@@ -1,64 +1,655 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Change Tracker v5.0</title>
-
-  <!-- Office JavaScript API (same hosted pattern used in Microsoft Office add-in samples) -->
-  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
-
-  <link rel="stylesheet" href="./taskpane.css" />
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;background:#f5f5f5;color:#333;padding:12px;font-size:12px}
+    .header{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+    .header h1{font-size:15px;font-weight:600;color:#0078d4}
+    .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;color:#fff}
+    .badge-off{background:#a0a0a0}.badge-on{background:#107c10}.badge-err{background:#d13438}
+    .info{background:#fff;border:1px solid #e0e0e0;border-radius:5px;padding:8px 10px;margin-bottom:8px;font-size:11px;line-height:1.5}
+    .info b{color:#0078d4}
+    .btn{display:inline-block;padding:6px 16px;border:none;border-radius:3px;font-size:12px;font-weight:600;cursor:pointer}
+    .btn-p{background:#0078d4;color:#fff}.btn-p:hover{background:#106ebe}
+    .btn-p:disabled{background:#a0a0a0;cursor:not-allowed}
+    .log{margin-top:8px;background:#1e1e1e;color:#d4d4d4;border-radius:5px;padding:8px;height:200px;overflow-y:auto;font-family:"Cascadia Code",Consolas,monospace;font-size:10px;line-height:1.5}
+    .log .ok{color:#4ec9b0}.log .wr{color:#dcdcaa}.log .er{color:#f44747}.log .in{color:#9cdcfe}.log .ed{color:#ce9178}
+    .meta{margin-top:6px;font-size:10px;color:#666}
+    .ft{margin-top:8px;font-size:10px;color:#999;text-align:center}
+  </style>
 </head>
 <body>
-  <main class="container">
-    <header class="header">
-      <h1>Change Tracker v5.0</h1>
-      <p class="subtitle">
-        GitHub Pages hosted task pane page for Excel Change Tracker
-      </p>
-    </header>
 
-    <section class="status-card">
-      <div class="status-row">
-        <span class="label">Environment</span>
-        <span id="environmentValue" class="value">Checking...</span>
-      </div>
-      <div class="status-row">
-        <span class="label">Office.js</span>
-        <span id="officeValue" class="value">Loading...</span>
-      </div>
-      <div class="status-row">
-        <span class="label">Status</span>
-        <span id="statusValue" class="value">Waiting...</span>
-      </div>
-    </section>
+<div class="header">
+  <h1>&#x1F4CA; Change Tracker</h1>
+  <span id="badge" class="badge badge-off">Inactive</span>
+  <span style="margin-left:auto;font-size:10px;color:#999">v5.0</span>
+</div>
 
-    <section class="actions">
-      <button id="startBtn" class="btn primary" type="button">Start Tracking</button>
-      <button id="stopBtn" class="btn secondary" type="button">Stop Tracking</button>
-      <button id="testBtn" class="btn ghost" type="button">Test Page</button>
-    </section>
+<div class="info">
+  <b>Sheet:</b> STD format &nbsp;|&nbsp;
+  <b>Log:</b> changelog<br/>
+  <span id="userDisp"></span>
+  <span id="countDisp" style="float:right;font-weight:600"></span>
+</div>
 
-    <section class="log-card">
-      <div class="log-header">
-        <h2>Activity Log</h2>
-        <button id="clearLogBtn" class="btn small" type="button">Clear</button>
-      </div>
-      <div id="logOutput" class="log-output"></div>
-    </section>
+<button id="btnStart" class="btn btn-p" disabled>&#x1F680; Start Tracking</button>
 
-    <section class="info-card">
-      <h2>What to expect</h2>
-      <ul>
-        <li>When opened in a normal browser, the page should still load.</li>
-        <li>When loaded inside Excel as an add-in page, Office.js should initialize.</li>
-        <li>This hosted page is suitable for GitHub Pages project-site hosting.</li>
-      </ul>
-    </section>
-  </main>
+<div id="logArea" class="log"><div class="in">Waiting for Office to initialize...</div></div>
 
-  <script src="./taskpane.js"></script>
+<div class="ft">Tracking continues while this pane is open &bull; Close = pause tracking</div>
+
+<script>
+/* ================================================================
+   CHANGE TRACKER v5.0 — Office Add-in (Real-time, Per-User SSO)
+   ================================================================ */
+
+// ═══════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════
+var TRACKED_SHEET   = "STD format";
+var CHANGELOG_SHEET = "changelog";
+var SHADOW_SHEET    = "__shadow";
+var ROWID_HEADER    = "RowID";
+var HEADER_ROW      = 0;
+var FIRST_DATA_ROW  = 1;
+var SCRIPT_VERSION  = "5.0";
+
+// ═══════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════
+var cachedUsername    = "Unknown User";
+var shadowByRowId    = {};
+var rowIndexToRowId  = {};
+var HEADERS          = [];
+var rowIdColIdx      = -1;
+var effectiveColCount = 0;
+var isInternalUpdate = false;
+var isTracking       = false;
+var changeCount      = 0;
+var CHUNK_SIZE       = 1600;
+
+// ═══════════════════════════════════════════
+// UI REFERENCES
+// ═══════════════════════════════════════════
+var logArea   = document.getElementById("logArea");
+var btnStart  = document.getElementById("btnStart");
+var badge     = document.getElementById("badge");
+var userDisp  = document.getElementById("userDisp");
+var countDisp = document.getElementById("countDisp");
+
+function log(msg, cls) {
+  var d = document.createElement("div");
+  d.className = cls || "in";
+  d.textContent = msg;
+  logArea.appendChild(d);
+  logArea.scrollTop = logArea.scrollHeight;
+}
+
+function setBadge(text, cls) {
+  badge.textContent = text;
+  badge.className = "badge " + cls;
+}
+
+function updateCount() {
+  countDisp.textContent = "Changes: " + changeCount;
+}
+
+// ═══════════════════════════════════════════
+// OFFICE INITIALIZATION
+// ═══════════════════════════════════════════
+Office.onReady(function(info) {
+  if (info.host === Office.HostType.Excel) {
+    log("\u2705 Office ready (Excel Online)", "ok");
+    btnStart.disabled = false;
+    btnStart.addEventListener("click", startTracking);
+  } else {
+    log("\u274C This add-in only works in Excel.", "er");
+  }
+});
+
+// ═══════════════════════════════════════════
+// USERNAME RESOLUTION (SSO -> localStorage -> prompt)
+// ═══════════════════════════════════════════
+async function resolveUsername() {
+  // Tier 1: SSO
+  try {
+    var token = await Office.auth.getAccessToken({ allowSignInPrompt: false, allowConsentPrompt: false });
+    var parts = token.split(".");
+    if (parts.length === 3) {
+      var payload = JSON.parse(atob(parts[1]));
+      var name = payload.preferred_username || payload.name || payload.upn || "";
+      if (name) { log("\u2705 SSO: " + name, "ok"); return name; }
+    }
+  } catch (e) { log("\u26A0 SSO unavailable, trying fallback...", "wr"); }
+
+  // Tier 2: localStorage
+  try {
+    var stored = localStorage.getItem("changeTracker_username");
+    if (stored && stored.trim()) { log("\u2705 Cached: " + stored.trim(), "ok"); return stored.trim(); }
+  } catch (e) { /* ignore */ }
+
+  // Tier 3: prompt
+  var prompted = prompt("Change Tracker: Enter your name or email for logging:");
+  if (prompted && prompted.trim()) {
+    try { localStorage.setItem("changeTracker_username", prompted.trim()); } catch (e) {}
+    return prompted.trim();
+  }
+  return "Unknown User";
+}
+
+// ═══════════════════════════════════════════
+// START TRACKING (main setup)
+// ═══════════════════════════════════════════
+async function startTracking() {
+  if (isTracking) { log("\u26A0 Already tracking!", "wr"); return; }
+  btnStart.disabled = true;
+  log("\u23F3 Initializing...", "in");
+
+  try {
+    cachedUsername = await resolveUsername();
+    userDisp.textContent = "\uD83D\uDC64 " + cachedUsername;
+
+    await Excel.run(async function(ctx) {
+
+      // ── Step 1: Validate tracked sheet ──
+      var ws = ctx.workbook.worksheets.getItemOrNullObject(TRACKED_SHEET);
+      ws.load("name");
+      await ctx.sync();
+      if (ws.isNullObject) { log("\u274C Sheet '" + TRACKED_SHEET + "' not found!", "er"); setBadge("Error","badge-err"); btnStart.disabled=false; return; }
+      log("\u2705 Found: " + ws.name, "ok");
+
+      // ── Step 2: Get dimensions (lightweight) ──
+      var used = ws.getUsedRange();
+      used.load(["rowCount","columnCount"]);
+      await ctx.sync();
+      var totalRows = used.rowCount;
+      var totalCols = used.columnCount;
+      log("\uD83D\uDCCA Data: " + totalRows + " rows \u00D7 " + totalCols + " cols", "in");
+
+      // ── Step 3: Read headers from row 1 ──
+      var hdrRange = ws.getRangeByIndexes(0, 0, 1, totalCols);
+      hdrRange.load("values");
+      await ctx.sync();
+      var hdrRow = hdrRange.values[0];
+      HEADERS = [];
+      var lastNamed = -1;
+      for (var i = 0; i < hdrRow.length; i++) {
+        var h = (hdrRow[i] == null ? "" : hdrRow[i]).toString().trim();
+        HEADERS.push(h);
+        if (h) lastNamed = i;
+      }
+      effectiveColCount = lastNamed + 1;
+      if (effectiveColCount < 1) effectiveColCount = totalCols;
+
+      CHUNK_SIZE = Math.max(500, Math.floor(80000 / effectiveColCount));
+      log("\u2699 Chunk: " + CHUNK_SIZE + " rows (" + effectiveColCount + " cols)", "in");
+
+      var preview = [];
+      for (var p = 0; p < HEADERS.length && preview.length < 8; p++) {
+        if (HEADERS[p] && HEADERS[p] !== ROWID_HEADER) preview.push(HEADERS[p]);
+      }
+      log("\uD83D\uDCCB Headers: " + preview.join(", ") + "...", "in");
+
+      // ── Step 4: Ensure changelog sheet ──
+      var logSh = ctx.workbook.worksheets.getItemOrNullObject(CHANGELOG_SHEET);
+      logSh.load("name");
+      await ctx.sync();
+      if (logSh.isNullObject) {
+        logSh = ctx.workbook.worksheets.add(CHANGELOG_SHEET);
+        log("\u2705 Created '" + CHANGELOG_SHEET + "'", "ok");
+      }
+      var lhdr = logSh.getRangeByIndexes(0,0,1,7);
+      lhdr.values = [["Timestamp","username","Sheet","Cell","Column Name","Old Value","New Value"]];
+      lhdr.format.font.bold = true;
+      await ctx.sync();
+
+      // ── Step 5: Ensure RowID column (batch) ──
+      rowIdColIdx = HEADERS.indexOf(ROWID_HEADER);
+      var dataUpdated = false;
+
+      if (rowIdColIdx === -1) {
+        rowIdColIdx = effectiveColCount;
+        log("\uD83D\uDD27 Adding RowID at col " + (rowIdColIdx+1), "in");
+
+        var ridArr = [[ROWID_HEADER]];
+        for (var rr = FIRST_DATA_ROW; rr < totalRows; rr++) { ridArr.push([generateRowId()]); }
+        await writeColumnInChunks(ctx, ws, rowIdColIdx, ridArr, CHUNK_SIZE);
+
+        var hideR = ws.getRangeByIndexes(0, rowIdColIdx, 1, 1);
+        hideR.getEntireColumn().setColumnHidden(true);
+        await ctx.sync();
+
+        effectiveColCount = rowIdColIdx + 1;
+        HEADERS.push(ROWID_HEADER);
+        CHUNK_SIZE = Math.max(500, Math.floor(80000 / effectiveColCount));
+        dataUpdated = true;
+        log("\u2705 RowID created (" + (totalRows-1) + " IDs)", "ok");
+      } else {
+        var ridCol = ws.getRangeByIndexes(0, rowIdColIdx, totalRows, 1);
+        ridCol.load("values");
+        await ctx.sync();
+        var ridVals = ridCol.values;
+        var blanks = 0;
+        for (var rb = FIRST_DATA_ROW; rb < ridVals.length; rb++) {
+          var rv = (ridVals[rb][0] == null ? "" : ridVals[rb][0]).toString().trim();
+          if (!rv) { ridVals[rb][0] = generateRowId(); blanks++; }
+        }
+        if (blanks > 0) {
+          await writeColumnInChunks(ctx, ws, rowIdColIdx, ridVals, CHUNK_SIZE);
+          dataUpdated = true;
+          log("\uD83D\uDD27 Filled " + blanks + " blank RowIDs", "ok");
+        }
+        var hideR2 = ws.getRangeByIndexes(0, rowIdColIdx, 1, 1);
+        hideR2.getEntireColumn().setColumnHidden(true);
+        await ctx.sync();
+      }
+
+      // Re-read headers if updated
+      if (dataUpdated) {
+        var newUsed = ws.getUsedRange();
+        newUsed.load(["rowCount","columnCount"]);
+        await ctx.sync();
+        totalRows = newUsed.rowCount;
+        totalCols = newUsed.columnCount;
+
+        var nhdr = ws.getRangeByIndexes(0,0,1,totalCols);
+        nhdr.load("values");
+        await ctx.sync();
+        HEADERS = [];
+        var nLast = -1;
+        for (var ni = 0; ni < nhdr.values[0].length; ni++) {
+          var nh = (nhdr.values[0][ni] == null ? "" : nhdr.values[0][ni]).toString().trim();
+          HEADERS.push(nh);
+          if (nh) nLast = ni;
+        }
+        effectiveColCount = nLast + 1;
+        if (effectiveColCount < 1) effectiveColCount = totalCols;
+        rowIdColIdx = HEADERS.indexOf(ROWID_HEADER);
+        CHUNK_SIZE = Math.max(500, Math.floor(80000 / effectiveColCount));
+      }
+
+      // ── Step 6: Load data into in-memory shadow ──
+      log("\uD83D\uDCD6 Loading shadow (" + totalRows + " rows)...", "in");
+      var allData = await readRangeInChunks(ctx, ws, 0, totalRows, effectiveColCount, CHUNK_SIZE);
+      log("\u2705 Data loaded: " + allData.length + " rows", "ok");
+
+      // Build maps
+      shadowByRowId = {};
+      rowIndexToRowId = {};
+      for (var sr = FIRST_DATA_ROW; sr < allData.length; sr++) {
+        var rid = (allData[sr][rowIdColIdx] == null ? "" : allData[sr][rowIdColIdx]).toString().trim();
+        if (rid) {
+          shadowByRowId[rid] = { rowIdx: sr, values: allData[sr].slice() };
+          rowIndexToRowId[sr] = rid;
+        }
+      }
+      log("\uD83D\uDD0D Shadow: " + Object.keys(shadowByRowId).length + " rows indexed", "ok");
+
+      // ── Step 7: Register change event ──
+      ws.onChanged.add(onWorksheetChanged);
+      await ctx.sync();
+
+      isTracking = true;
+      setBadge("Active", "badge-on");
+      updateCount();
+      log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", "in");
+      log("\uD83C\uDFAF TRACKING ACTIVE!", "ok");
+      log("Edit cells in '" + TRACKED_SHEET + "' \u2014 changes logged instantly", "ok");
+      log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500", "in");
+    });
+  } catch (error) {
+    log("\u274C Setup error: " + JSON.stringify(error), "er");
+    setBadge("Error", "badge-err");
+    btnStart.disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════
+// CHANGE EVENT HANDLER (fires on every edit)
+// ═══════════════════════════════════════════
+async function onWorksheetChanged(event) {
+  if (isInternalUpdate) return;
+
+  try {
+    await Excel.run(async function(ctx) {
+      var sheet = ctx.workbook.worksheets.getItem(event.worksheetId);
+      sheet.load("name");
+      await ctx.sync();
+      if (sheet.name !== TRACKED_SHEET) return;
+
+      // Structural changes
+      var structural = ["RowInserted","RowDeleted","ColumnInserted","ColumnDeleted","CellInserted","CellDeleted"];
+      if (structural.indexOf(event.changeType) !== -1) {
+        await handleStructuralChange(ctx, sheet, event);
+        return;
+      }
+
+      // Value change
+      var changed = sheet.getRange(event.address);
+      changed.load(["rowIndex","columnIndex","rowCount","columnCount","values"]);
+      await ctx.sync();
+
+      var ts = formatTimestamp(new Date());
+      var logRows = [];
+
+      for (var r = 0; r < changed.rowCount; r++) {
+        for (var c = 0; c < changed.columnCount; c++) {
+          var absRow = changed.rowIndex + r;
+          var absCol = changed.columnIndex + c;
+
+          if (absRow === HEADER_ROW) continue;
+          if (absCol === rowIdColIdx) continue;
+
+          var newVal = changed.values[r][c];
+          var oldVal = getOldValue(absRow, absCol);
+
+          if (valuesAreEqual(oldVal, newVal)) continue;
+
+          var oldD = displayValue(oldVal);
+          var newD = displayValue(newVal);
+          if (oldD === newD) continue;
+
+          var colN = HEADERS[absCol] || ("Col" + (absCol + 1));
+          var addr = colToA1(absCol) + (absRow + 1);
+          logRows.push([ts, cachedUsername, TRACKED_SHEET, addr, colN, oldD, newD]);
+          log("  \uD83D\uDCDD " + addr + " (" + colN + "): \"" + oldD + "\" \u2192 \"" + newD + "\"", "ed");
+
+          updateShadow(absRow, absCol, newVal);
+        }
+      }
+
+      if (logRows.length > 0) {
+        isInternalUpdate = true;
+        var logSh = ctx.workbook.worksheets.getItem(CHANGELOG_SHEET);
+        var ins = logSh.getRangeByIndexes(1, 0, logRows.length, 7);
+        ins.insert(Excel.InsertShiftDirection.down);
+        var wr = logSh.getRangeByIndexes(1, 0, logRows.length, 7);
+        wr.values = logRows;
+        await ctx.sync();
+        isInternalUpdate = false;
+
+        changeCount += logRows.length;
+        updateCount();
+        log("  \u2705 " + logRows.length + " change(s) logged", "ok");
+      }
+    });
+  } catch (error) {
+    isInternalUpdate = false;
+    log("\u274C Handler error: " + JSON.stringify(error), "er");
+  }
+}
+
+// ═══════════════════════════════════════════
+// STRUCTURAL CHANGE HANDLER
+// ═══════════════════════════════════════════
+async function handleStructuralChange(ctx, sheet, event) {
+  log("\u26A1 Structural: " + event.changeType + " at " + event.address, "wr");
+
+  try {
+    // Log the structural change
+    isInternalUpdate = true;
+    var ts = formatTimestamp(new Date());
+    var logSh = ctx.workbook.worksheets.getItem(CHANGELOG_SHEET);
+    var ins = logSh.getRangeByIndexes(1, 0, 1, 7);
+    ins.insert(Excel.InsertShiftDirection.down);
+    var wr = logSh.getRangeByIndexes(1, 0, 1, 7);
+    wr.values = [[ts, cachedUsername, TRACKED_SHEET, event.address, "[" + event.changeType + "]", "", ""]];
+    await ctx.sync();
+    isInternalUpdate = false;
+
+    changeCount++;
+    updateCount();
+
+    // Re-sync shadow
+    log("  \u23F3 Re-syncing shadow...", "in");
+
+    var used = sheet.getUsedRange();
+    used.load(["rowCount","columnCount"]);
+    await ctx.sync();
+
+    var newTotalRows = used.rowCount;
+
+    // Re-read headers
+    var nhdr = sheet.getRangeByIndexes(0, 0, 1, used.columnCount);
+    nhdr.load("values");
+    await ctx.sync();
+    HEADERS = [];
+    var nLast = -1;
+    for (var ni = 0; ni < nhdr.values[0].length; ni++) {
+      var nh = (nhdr.values[0][ni] == null ? "" : nhdr.values[0][ni]).toString().trim();
+      HEADERS.push(nh);
+      if (nh) nLast = ni;
+    }
+    effectiveColCount = nLast + 1;
+    if (effectiveColCount < 1) effectiveColCount = used.columnCount;
+    rowIdColIdx = HEADERS.indexOf(ROWID_HEADER);
+    CHUNK_SIZE = Math.max(500, Math.floor(80000 / effectiveColCount));
+
+    // Fill blank RowIDs
+    if (rowIdColIdx >= 0) {
+      var ridCol = sheet.getRangeByIndexes(0, rowIdColIdx, newTotalRows, 1);
+      ridCol.load("values");
+      await ctx.sync();
+      var ridVals = ridCol.values;
+      var blanks = 0;
+      for (var rb = FIRST_DATA_ROW; rb < ridVals.length; rb++) {
+        var rv = (ridVals[rb][0] == null ? "" : ridVals[rb][0]).toString().trim();
+        if (!rv) { ridVals[rb][0] = generateRowId(); blanks++; }
+      }
+      if (blanks > 0) {
+        await writeColumnInChunks(ctx, sheet, rowIdColIdx, ridVals, CHUNK_SIZE);
+        log("  \uD83D\uDD27 Assigned " + blanks + " new RowIDs", "ok");
+      }
+    }
+
+    // Re-read all data
+    var allData = await readRangeInChunks(ctx, sheet, 0, newTotalRows, effectiveColCount, CHUNK_SIZE);
+
+    shadowByRowId = {};
+    rowIndexToRowId = {};
+    for (var sr = FIRST_DATA_ROW; sr < allData.length; sr++) {
+      var rid = (allData[sr][rowIdColIdx] == null ? "" : allData[sr][rowIdColIdx]).toString().trim();
+      if (rid) {
+        shadowByRowId[rid] = { rowIdx: sr, values: allData[sr].slice() };
+        rowIndexToRowId[sr] = rid;
+      }
+    }
+    log("  \u2705 Shadow re-synced: " + Object.keys(shadowByRowId).length + " rows", "ok");
+  } catch (e2) {
+    isInternalUpdate = false;
+    log("  \u274C Structural sync error: " + JSON.stringify(e2), "er");
+  }
+}
+
+// ═══════════════════════════════════════════
+// SHADOW HELPERS
+// ═══════════════════════════════════════════
+function getOldValue(absRow, absCol) {
+  var rid = rowIndexToRowId[absRow];
+  if (!rid) return "";
+  var entry = shadowByRowId[rid];
+  if (!entry) return "";
+  if (absCol >= entry.values.length) return "";
+  return entry.values[absCol];
+}
+
+function updateShadow(absRow, absCol, newVal) {
+  var rid = rowIndexToRowId[absRow];
+  if (!rid) return;
+  var entry = shadowByRowId[rid];
+  if (!entry) return;
+  if (absCol < entry.values.length) {
+    entry.values[absCol] = newVal;
+  }
+}
+
+// ═══════════════════════════════════════════
+// CHUNKED READ (adaptive, with retry)
+// ═══════════════════════════════════════════
+async function readRangeInChunks(ctx, sheet, startRow, totalRows, totalCols, chunkSize) {
+  var allData = [];
+  var currentRow = startRow;
+
+  while (currentRow < startRow + totalRows) {
+    var rowsToRead = Math.min(chunkSize, startRow + totalRows - currentRow);
+    var success = false;
+
+    while (!success) {
+      try {
+        var chunkRange = sheet.getRangeByIndexes(currentRow, 0, rowsToRead, totalCols);
+        chunkRange.load("values");
+        await ctx.sync();
+        for (var r = 0; r < chunkRange.values.length; r++) {
+          allData.push(chunkRange.values[r]);
+        }
+        success = true;
+      } catch (e) {
+        if (rowsToRead <= 100) throw e;
+        rowsToRead = Math.floor(rowsToRead / 2);
+        log("\u26A0 Chunk too large, retrying with " + rowsToRead + " rows...", "wr");
+      }
+    }
+    currentRow += rowsToRead;
+  }
+  return allData;
+}
+
+// ═══════════════════════════════════════════
+// CHUNKED WRITE (adaptive, with retry)
+// ═══════════════════════════════════════════
+async function writeRangeInChunks(ctx, sheet, data, chunkSize) {
+  if (data.length === 0) return;
+  var totalCols = data[0].length;
+  var currentRow = 0;
+
+  while (currentRow < data.length) {
+    var rowsToWrite = Math.min(chunkSize, data.length - currentRow);
+    var success = false;
+
+    while (!success) {
+      try {
+        var chunk = [];
+        for (var r = 0; r < rowsToWrite; r++) { chunk.push(data[currentRow + r]); }
+        var wr = sheet.getRangeByIndexes(currentRow, 0, rowsToWrite, totalCols);
+        wr.values = chunk;
+        await ctx.sync();
+        success = true;
+      } catch (e) {
+        if (rowsToWrite <= 100) throw e;
+        rowsToWrite = Math.floor(rowsToWrite / 2);
+        log("\u26A0 Write chunk too large, retrying " + rowsToWrite + " rows...", "wr");
+      }
+    }
+    currentRow += rowsToWrite;
+  }
+}
+
+// ═══════════════════════════════════════════
+// CHUNKED COLUMN WRITE (single column, with retry)
+// ═══════════════════════════════════════════
+async function writeColumnInChunks(ctx, sheet, colIdx, data, chunkSize) {
+  if (data.length === 0) return;
+  var currentRow = 0;
+
+  while (currentRow < data.length) {
+    var rowsToWrite = Math.min(chunkSize, data.length - currentRow);
+    var success = false;
+
+    while (!success) {
+      try {
+        var chunk = [];
+        for (var r = 0; r < rowsToWrite; r++) { chunk.push(data[currentRow + r]); }
+        var wr = sheet.getRangeByIndexes(currentRow, colIdx, rowsToWrite, 1);
+        wr.values = chunk;
+        await ctx.sync();
+        success = true;
+      } catch (e) {
+        if (rowsToWrite <= 100) throw e;
+        rowsToWrite = Math.floor(rowsToWrite / 2);
+        log("\u26A0 Col write retry: " + rowsToWrite + " rows...", "wr");
+      }
+    }
+    currentRow += rowsToWrite;
+  }
+}
+
+// ═══════════════════════════════════════════
+// SMART VALUE COMPARISON (same as v4.2)
+// ═══════════════════════════════════════════
+function valuesAreEqual(a, b) {
+  var aE = (a === null || a === undefined || a === "");
+  var bE = (b === null || b === undefined || b === "");
+  if (aE && bE) return true;
+  if (aE !== bE) return false;
+  if (a === b) return true;
+  if (typeof a === "number" && typeof b === "number") {
+    if (a === b) return true;
+    var d = Math.abs(a - b);
+    var m = Math.max(Math.abs(a), Math.abs(b), 1);
+    return d / m < 1e-10;
+  }
+  var sA = (a == null ? "" : a).toString().trim();
+  var sB = (b == null ? "" : b).toString().trim();
+  if (sA === sB) return true;
+  var nA = Number(sA), nB = Number(sB);
+  if (!isNaN(nA) && !isNaN(nB) && sA !== "" && sB !== "") {
+    if (nA === nB) return true;
+    var d2 = Math.abs(nA - nB);
+    var m2 = Math.max(Math.abs(nA), Math.abs(nB), 1);
+    return d2 / m2 < 1e-10;
+  }
+  var bA = sA.toLowerCase(), bB = sB.toLowerCase();
+  if ((bA==="true"||bA==="false") && (bB==="true"||bB==="false")) return bA === bB;
+  return false;
+}
+
+// ═══════════════════════════════════════════
+// CLEAN DISPLAY VALUE
+// ═══════════════════════════════════════════
+function displayValue(v) {
+  if (v === null || v === undefined || v === "") return "";
+  if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+  if (typeof v === "number") return parseFloat(v.toPrecision(15)).toString();
+  return v.toString().trim();
+}
+
+// ═══════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════
+function generateRowId() {
+  var hex = "";
+  for (var i = 0; i < 16; i++) hex += Math.floor(Math.random()*16).toString(16);
+  return "RID-" + hex;
+}
+
+function formatTimestamp(d) {
+  var mm = String(d.getMonth()+1).padStart(2,"0");
+  var dd = String(d.getDate()).padStart(2,"0");
+  var yyyy = d.getFullYear();
+  var h = d.getHours();
+  var ap = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  var hh = String(h).padStart(2,"0");
+  var mi = String(d.getMinutes()).padStart(2,"0");
+  var ss = String(d.getSeconds()).padStart(2,"0");
+  return mm+"/"+dd+"/"+yyyy+" "+hh+":"+mi+":"+ss+" "+ap;
+}
+
+function colToA1(idx) {
+  var r = "";
+  var i = idx;
+  while (i >= 0) {
+    r = String.fromCharCode((i%26)+65) + r;
+    i = Math.floor(i/26) - 1;
+  }
+  return r;
+}
+</script>
 </body>
 </html>
